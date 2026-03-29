@@ -4,9 +4,9 @@ const cors    = require('cors');
 const app     = express();
 
 // ✅ هنسحب الموزعين من المتغيرات (Variables) في Railway
-// لو المتغير مش موجود لأي سبب، هيخلي الأساسي شغال كاحتياطي
-const hostsString = process.env.HOSTS || 'http://freeiptv.ottc.xyz:80';
-const HOSTS = hostsString.split(',').map(h => h.trim()); // بيحولهم لمصفوفة
+// لو المتغير HOSTS مش موجود، هيجيب الـ REAL_HOST القديم بتاعك كاحتياطي
+const hostsString = process.env.HOSTS || process.env.REAL_HOST || 'http://freeiptv.ottc.xyz:80';
+const HOSTS = hostsString.split(',').map(h => h.trim()); // بيحولهم لمصفوفة سواء موزع أو أكتر
 
 app.use(cors());
 app.use(express.json());
@@ -24,7 +24,10 @@ app.get('/auth', async (req, res) => {
   // هنجرب الموزعين واحد ورا التاني
   for (const host of HOSTS) {
     try {
-      const response = await axios.get(`${host}/player_api.php`, {
+      // بننظف اللينك لو في آخره شرطة مايلة بالغلط
+      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      
+      const response = await axios.get(`${cleanHost}/player_api.php`, {
         params: { username, password },
         timeout: 10000, 
       });
@@ -32,10 +35,10 @@ app.get('/auth', async (req, res) => {
       const data = response.data;
 
       if (data?.user_info?.auth === 1 || data?.user_info?.status === 'Active') {
-        console.log(`✅ Auth success for: ${username} on ${host}`);
+        console.log(`✅ Auth success for: ${username} on ${cleanHost}`);
         return res.json({
           success: true,
-          server_url: host, // بنرجع للموبايل والويب اسم الموزع اللي نفع
+          server_url: cleanHost, // بنرجع للموبايل والويب اسم الموزع اللي نفع
           username,
           password,
           user_info: data.user_info,
