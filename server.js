@@ -1,17 +1,14 @@
 const express = require('express');
 const axios   = require('axios');
+const cors    = require('cors'); // ✅ التعديل الأول: تفعيل CORS للويب
 const app     = express();
 
-// ✅ الهوست الحقيقي — مخفي هنا في السيرفر
 const REAL_HOST = process.env.REAL_HOST || 'http://freeiptv.ottc.xyz:80';
 
+app.use(cors()); // ✅ السماح للويب
 app.use(express.json());
 
-// ── AUTH ──────────────────────────────────────────────────────
-// التطبيق بيبعت: GET /auth?username=X&password=X
-// السيرفر بيتحقق ويرجع الهوست الحقيقي للتطبيق
-// بعد كده التطبيق بيكلم الموزع مباشرة بدون ما يمر بسيرفرك
-// ──────────────────────────────────────────────────────────────
+// ── AUTH (نفس كودك الأصلي اللي شغال معاك بالظبط بدون أي تغيير) ──────────
 app.get('/auth', async (req, res) => {
   const { username, password } = req.query;
 
@@ -36,8 +33,6 @@ app.get('/auth', async (req, res) => {
       console.log('✅ Auth success for:', username);
       return res.json({
         success: true,
-        // ✅ بنرجع الهوست الحقيقي للتطبيق
-        // بعد كده التطبيق يكلم الموزع مباشرة
         server_url: REAL_HOST,
         username,
         password,
@@ -65,6 +60,27 @@ app.get('/auth', async (req, res) => {
       success: false,
       message: 'Server error, please try again',
     });
+  }
+});
+
+// ── PROXY (التعديل التاني: الكوبري الخاص بالويب بس) ──────────
+app.get('/proxy', async (req, res) => {
+  try {
+    const targetUrl = req.query.url; 
+    
+    if (!targetUrl) {
+      return res.status(400).json({ success: false, message: 'Missing URL parameter' });
+    }
+
+    const response = await axios.get(targetUrl, {
+      timeout: 30000,
+      responseType: 'stream'
+    });
+    
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('❌ Proxy Error:', error.message);
+    res.status(500).json({ success: false, message: 'Proxy failed' });
   }
 });
 
