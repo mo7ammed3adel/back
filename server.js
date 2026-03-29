@@ -1,80 +1,81 @@
 const express = require('express');
 const axios   = require('axios');
+const cors    = require('cors'); 
 const app     = express();
 
-// ✅ الهوست الحقيقي — مخفي هنا في السيرفر
-const REAL_HOST = process.env.REAL_HOST || 'http://freeiptv.ottc.xyz:80';
+// ✅ هنسحب الموزعين من المتغيرات (Variables) في Railway
+// لو المتغير مش موجود لأي سبب، هيخلي الأساسي شغال كاحتياطي
+const hostsString = process.env.HOSTS || 'http://freeiptv.ottc.xyz:80';
+const HOSTS = hostsString.split(',').map(h => h.trim()); // بيحولهم لمصفوفة
 
+app.use(cors());
 app.use(express.json());
 
-// ── AUTH ──────────────────────────────────────────────────────
-// التطبيق بيبعت: GET /auth?username=X&password=X
-// السيرفر بيتحقق ويرجع الهوست الحقيقي للتطبيق
-// بعد كده التطبيق بيكلم الموزع مباشرة بدون ما يمر بسيرفرك
-// ──────────────────────────────────────────────────────────────
+// ── AUTH (نظام البحث الشامل في كل الموزعين) ───────────────────────────
 app.get('/auth', async (req, res) => {
   const { username, password } = req.query;
 
   if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      message: 'Username and password required'
-    });
+    return res.status(400).json({ success: false, message: 'Username and password required' });
   }
 
   console.log('▶ Auth request for:', username);
 
+  // هنجرب الموزعين واحد ورا التاني
+  for (const host of HOSTS) {
+    try {
+      const response = await axios.get(`${host}/player_api.php`, {
+        params: { username, password },
+        timeout: 10000, 
+      });
+
+      const data = response.data;
+
+      if (data?.user_info?.auth === 1 || data?.user_info?.status === 'Active') {
+        console.log(`✅ Auth success for: ${username} on ${host}`);
+        return res.json({
+          success: true,
+          server_url: host, // بنرجع للموبايل والويب اسم الموزع اللي نفع
+          username,
+          password,
+          user_info: data.user_info,
+        });
+      }
+    } catch (error) {
+       console.log(`⚠️ Failed on ${host}, trying next...`);
+    }
+  }
+
+  console.log('❌ Auth failed on all hosts for:', username);
+  return res.status(401).json({ success: false, message: 'Invalid username or password' });
+});
+
+// ── PROXY (خاص بحل مشكلة الويب الشامل) ───────────────────────────
+app.get('/proxy', async (req, res) => {
   try {
-    const response = await axios.get(`${REAL_HOST}/player_api.php`, {
-      params: { username, password },
-      timeout: 15000,
-    });
-
-    const data = response.data;
-
-    if (data?.user_info?.auth === 1 || data?.user_info?.status === 'Active') {
-      console.log('✅ Auth success for:', username);
-      return res.json({
-        success: true,
-        // ✅ بنرجع الهوست الحقيقي للتطبيق
-        // بعد كده التطبيق يكلم الموزع مباشرة
-        server_url: REAL_HOST,
-        username,
-        password,
-        user_info: {
-          username:           data.user_info?.username,
-          status:             data.user_info?.status,
-          exp_date:           data.user_info?.exp_date,
-          is_trial:           data.user_info?.is_trial,
-          active_connections: data.user_info?.active_connections,
-          max_connections:    data.user_info?.max_connections,
-          created_at:         data.user_info?.created_at,
-        },
-      });
-    } else {
-      console.log('❌ Auth failed for:', username);
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid username or password',
-      });
+    const targetUrl = req.query.url; 
+    
+    if (!targetUrl) {
+      return res.status(400).json({ success: false, message: 'Missing URL parameter' });
     }
 
-  } catch (error) {
-    console.error('❌ Error:', error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error, please try again',
+    const response = await axios.get(targetUrl, {
+      timeout: 30000,
+      responseType: 'stream'
     });
+    
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('❌ Proxy Error:', error.message);
+    res.status(500).json({ success: false, message: 'Proxy failed' });
   }
 });
 
-// ── PING ──────────────────────────────────────────────────────
 app.get('/ping', (req, res) => {
   res.json({ status: 'alive' });
 });
 
-// ── START ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Flix TV Proxy running on port ${PORT}`);
+  console.log(`✅ Flix TV Dynamic Proxy running on port ${PORT}`);
 });
